@@ -1,0 +1,75 @@
+---
+// Holt die externe Seite SERVERSEITIG und liefert sie als fertiges HTML aus.
+// Kein CORS, kein JavaScript beim Besucher, Suchmaschinen sehen den Inhalt.
+
+const EXTERN_URL = "https://extern.bippesbrandao.de/test/";
+const CACHE_SECONDS = 300; // 5 Minuten zwischenspeichern
+
+let title = "Extern";
+let headExtras = "";
+let body = "";
+let ok = true;
+
+try {
+  const res = await fetch(EXTERN_URL, {
+    headers: { "User-Agent": "Mozilla/5.0 (Webflow Cloud Proxy)" },
+    // Cloudflare-Cache für den Abruf der Quelle
+    cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true },
+  } as RequestInit);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+
+  // Relative Pfade (src/href/srcset) auf die externe Domain umbiegen
+  const abs = (path: string) => {
+    try { return new URL(path, EXTERN_URL).href; } catch { return path; }
+  };
+  const absolutize = (s: string) =>
+    s
+      .replace(
+        /(src|href)=(["'])(?!https?:|\/\/|#|mailto:|tel:|data:|javascript:)([^"']*)\2/gi,
+        (_m, attr, q, path) => `${attr}=${q}${abs(path)}${q}`,
+      )
+      .replace(/srcset=(["'])([^"']*)\1/gi, (_m, q, set) =>
+        `srcset=${q}${set
+          .split(",")
+          .map((p: string) => {
+            const [u, ...rest] = p.trim().split(/\s+/);
+            return [abs(u), ...rest].join(" ");
+          })
+          .join(", ")}${q}`,
+      );
+
+  title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? title).trim();
+  headExtras = absolutize(
+    (html.match(/<style[\s\S]*?<\/style>|<link[^>]+rel=["']?stylesheet[^>]*>/gi) ?? []).join("\n"),
+  );
+  body = absolutize(html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html);
+} catch (err) {
+  ok = false;
+  console.error("Externe Seite nicht erreichbar:", err);
+}
+
+Astro.response.headers.set(
+  "Cache-Control",
+  ok ? `public, max-age=0, s-maxage=${CACHE_SECONDS}` : "no-store",
+);
+if (!ok) Astro.response.status = 502;
+---
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <Fragment set:html={headExtras} />
+  </head>
+  <body>
+    {ok ? (
+      <Fragment set:html={body} />
+    ) : (
+      <p style="font-family: system-ui, sans-serif; padding: 48px; text-align: center;">
+        Der Inhalt ist gerade nicht erreichbar. Bitte später erneut versuchen.
+      </p>
+    )}
+  </body>
+</html>

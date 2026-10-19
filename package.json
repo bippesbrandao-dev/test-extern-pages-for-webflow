@@ -1,0 +1,21 @@
+{
+  "name": "extern-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "wrangler dev"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^12.6.13",
+    "astro": "^5.18.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
