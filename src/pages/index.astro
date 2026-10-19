@@ -3,19 +3,34 @@
 // Kein CORS, kein JavaScript beim Besucher, Suchmaschinen sehen den Inhalt.
 
 const EXTERN_URL = "https://extern.bippesbrandao.de/test/";
+// Eine Webflow-Seite der Site, deren CSS (Schriften, Grundstile) übernommen wird,
+// damit die Ausgabe genauso aussieht wie auf /extern.
+const WEBFLOW_STYLE_URL = "https://arnes-supercool-site-3a8f5d.webflow.io/extern";
 const CACHE_SECONDS = 300; // 5 Minuten zwischenspeichern
+const TIMEOUT_MS = 8000; // nach 8 s abbrechen statt endlos zu laden
+
+// fetch mit Zeitlimit: hängt der Zielserver, gibt es einen Fehler statt Endlos-Laden
+const fetchOpts = () =>
+  ({
+    headers: { "User-Agent": "Mozilla/5.0 (Webflow Cloud Proxy)" },
+    // Cloudflare-Cache für die Abrufe
+    cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  }) as RequestInit;
 
 let title = "Extern";
+let webflowHead = "";
 let headExtras = "";
 let body = "";
 let ok = true;
 
+// Webflow-CSS holen (Fehler hier sind nicht fatal)
+const webflowPromise = fetch(WEBFLOW_STYLE_URL, fetchOpts())
+  .then((r) => (r.ok ? r.text() : ""))
+  .catch(() => "");
+
 try {
-  const res = await fetch(EXTERN_URL, {
-    headers: { "User-Agent": "Mozilla/5.0 (Webflow Cloud Proxy)" },
-    // Cloudflare-Cache für den Abruf der Quelle
-    cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true },
-  } as RequestInit);
+  const res = await fetch(EXTERN_URL, fetchOpts());
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
@@ -49,6 +64,17 @@ try {
   console.error("Externe Seite nicht erreichbar:", err);
 }
 
+// Aus dem Webflow-<head>: Stylesheets, <style> und Webfont-Skripte übernehmen
+{
+  const wf = await webflowPromise;
+  const head = wf.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  const parts =
+    head.match(
+      /<link[^>]+rel=["']?(?:stylesheet|preconnect)[^>]*>|<style[\s\S]*?<\/style>|<script[^>]*webfont[^>]*><\/script>|<script[^>]*>[^<]*WebFont\.load[\s\S]*?<\/script>/gi,
+    ) ?? [];
+  webflowHead = parts.join("\n");
+}
+
 Astro.response.headers.set(
   "Cache-Control",
   ok ? `public, max-age=0, s-maxage=${CACHE_SECONDS}` : "no-store",
@@ -61,11 +87,13 @@ if (!ok) Astro.response.status = 502;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <!-- zuerst das Webflow-CSS, danach das der externen Seite (wie auf /extern) -->
+    <Fragment set:html={webflowHead} />
     <Fragment set:html={headExtras} />
   </head>
   <body>
     {ok ? (
-      <Fragment set:html={body} />
+      <div id="extern-content"><Fragment set:html={body} /></div>
     ) : (
       <p style="font-family: system-ui, sans-serif; padding: 48px; text-align: center;">
         Der Inhalt ist gerade nicht erreichbar. Bitte später erneut versuchen.
